@@ -1223,8 +1223,8 @@ def draw_title_screen(
             color = (18, 45, 37) if (x // 48 + y // 48) % 2 == 0 else (20, 51, 41)
             pygame.draw.rect(surface, color, (x, y, 48, 48))
 
-    panel_w = min(820, screen_w - layout.margin * 4)
-    panel_h = min(430, screen_h - layout.margin * 4)
+    panel_w = min(900, screen_w - layout.margin * 4)
+    panel_h = min(520, screen_h - layout.margin * 4)
     panel = pygame.Rect(0, 0, panel_w, panel_h)
     panel.center = (screen_w // 2, screen_h // 2)
     pygame.draw.rect(surface, (14, 19, 26), panel)
@@ -1232,10 +1232,13 @@ def draw_title_screen(
     pygame.draw.rect(surface, (76, 91, 86), panel.inflate(-18, -18), 3)
 
     title_image = title_font.render("EchoWorld", True, (247, 205, 104))
-    subtitle_image = subtitle_font.render(
-        "NPCs remember. Villages gossip. Memory can be bribed.",
-        True,
-        (225, 230, 213),
+    description = (
+        "A memory-driven RPG where NPCs remember, gossip, forgive, and hold "
+        "promises against you."
+    )
+    description_lines = wrap_text(description, subtitle_font, panel.width - 110)
+    powered_image = subtitle_font.render(
+        "Powered by Cognee.", True, (95, 235, 210)
     )
     prompt_color = (
         (247, 241, 213)
@@ -1243,16 +1246,56 @@ def draw_title_screen(
         else (159, 167, 156)
     )
     prompt_image = prompt_font.render(
-        "Press Enter to Start",
+        "Press Enter to begin the guided demo.",
         True,
         prompt_color,
     )
+    fullscreen_image = prompt_font.render(
+        "Best viewed fullscreen.", True, (198, 218, 190)
+    )
+    footer_image = prompt_font.render(
+        "Built for the WeMakeDevs x Cognee Hackathon",
+        True,
+        (173, 181, 169),
+    )
     escape_image = prompt_font.render("Esc: Quit", True, (159, 167, 156))
 
-    surface.blit(title_image, title_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.26)))
-    surface.blit(subtitle_image, subtitle_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.49)))
-    surface.blit(prompt_image, prompt_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.72)))
-    surface.blit(escape_image, escape_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.87)))
+    surface.blit(
+        title_image,
+        title_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.18)),
+    )
+    description_y = panel.y + round(panel_h * 0.34)
+    for index, line in enumerate(description_lines[:3]):
+        line_image = subtitle_font.render(line, True, (225, 230, 213))
+        surface.blit(
+            line_image,
+            line_image.get_rect(
+                center=(
+                    panel.centerx,
+                    description_y + index * subtitle_font.get_linesize(),
+                )
+            ),
+        )
+    surface.blit(
+        powered_image,
+        powered_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.53)),
+    )
+    surface.blit(
+        prompt_image,
+        prompt_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.68)),
+    )
+    surface.blit(
+        fullscreen_image,
+        fullscreen_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.76)),
+    )
+    surface.blit(
+        footer_image,
+        footer_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.89)),
+    )
+    surface.blit(
+        escape_image,
+        escape_image.get_rect(center=(panel.centerx, panel.y + panel_h * 0.96)),
+    )
 
 
 def draw_loading_overlay(
@@ -2963,9 +3006,14 @@ async def run_game(browser_mode: bool = False) -> None:
                     village_attitude_summary = attitude_summary_from_state(
                         npc_attitudes
                     )
-                    dialogue_title = "System"
-                    dialogue_pages = paginate_dialogue(result_text, dialogue_font)
                     dialogue_history.append(("System", result_text))
+                    # Reset returns to the landing screen. Pressing Enter then
+                    # reveals the freshly reset intro popup; a normal launch
+                    # keeps whatever tutorial progress was loaded above.
+                    dialogue_title = None
+                    dialogue_pages = []
+                    title_screen_active = True
+                    tutorial_popup_deferred = False
                 dialogue_page_index = 0
 
         if tutorial_popup_deferred and not dialogue_pages:
