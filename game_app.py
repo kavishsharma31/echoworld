@@ -103,15 +103,27 @@ class UILayout:
     loading: pygame.Rect
 
 
+def get_browser_device_scale() -> float:
+    """Return browser pixel density without importing browser APIs on desktop."""
+    try:
+        import platform
+
+        density = float(platform.window.devicePixelRatio)
+    except Exception:
+        density = 1.0
+    return max(1.0, min(3.0, density))
+
+
 def get_display_size(browser_mode: bool) -> tuple[int, int]:
-    """Read the live browser viewport, with a safe Pygbag fallback."""
+    """Return the real canvas backing size, including browser pixel density."""
     if not browser_mode:
         return WINDOW_SIZE
     try:
         import platform
 
-        width = int(platform.window.innerWidth)
-        height = int(platform.window.innerHeight)
+        density = get_browser_device_scale()
+        width = round(float(platform.window.innerWidth) * density)
+        height = round(float(platform.window.innerHeight) * density)
     except Exception:
         width, height = (1280, 720)
     if width < 320 or height < 240:
@@ -132,13 +144,17 @@ def compute_render_metrics(
             INTERNAL_HEIGHT,
             SCALE,
         )
-    shortest_side = min(screen_w, screen_h)
-    if screen_w >= 1600 and shortest_side >= 900:
-        pixel_scale = 4
+    density = get_browser_device_scale()
+    css_w = screen_w / density
+    css_h = screen_h / density
+    shortest_side = min(css_w, css_h)
+    if css_w >= 1600 and shortest_side >= 900:
+        base_pixel_scale = 4
     elif shortest_side < 600:
-        pixel_scale = 2
+        base_pixel_scale = 2
     else:
-        pixel_scale = BROWSER_PIXEL_SCALE
+        base_pixel_scale = BROWSER_PIXEL_SCALE
+    pixel_scale = max(1, round(base_pixel_scale * density))
     return RenderMetrics(
         screen_w,
         screen_h,
@@ -148,10 +164,19 @@ def compute_render_metrics(
     )
 
 
+def compute_ui_scale(screen_w: int, screen_h: int) -> float:
+    """Scale native-resolution UI geometry with the real display backing size."""
+    responsive_scale = min(screen_w / 1280, screen_h / 720)
+    return max(1.0, min(3.0, responsive_scale))
+
+
+def ui_px(screen_w: int, screen_h: int, value: float) -> int:
+    return max(1, round(value * compute_ui_scale(screen_w, screen_h)))
+
+
 def create_ui_fonts(screen_w: int, screen_h: int) -> dict[str, pygame.font.Font]:
     """Create anti-aliased fonts at final-window density, never world resolution."""
-    del screen_w  # Height gives stable sizing across wide and narrow layouts.
-    scale = max(0.85, min(1.0, screen_h / WINDOW_SIZE[1]))
+    scale = compute_ui_scale(screen_w, screen_h)
 
     def make(size: int, *, bold: bool = False) -> pygame.font.Font:
         # Pygame's bundled font is available in Pygbag; system fonts such as
@@ -179,53 +204,75 @@ def create_ui_fonts(screen_w: int, screen_h: int) -> dict[str, pygame.font.Font]
 
 
 def compute_ui_layout(screen_w: int, screen_h: int) -> UILayout:
-    margin = max(12, min(24, screen_w // 80))
-    hud_height = max(112, min(126, screen_h // 5))
+    scale = compute_ui_scale(screen_w, screen_h)
+    px = lambda value: max(1, round(value * scale))
+    margin = max(px(12), min(px(24), screen_w // 80))
+    hud_height = max(px(112), min(px(126), screen_h // 5))
     hud = pygame.Rect(margin, margin, screen_w - margin * 2, hud_height)
-    right_w = min(320, max(250, screen_w // 4))
-    memory = pygame.Rect(screen_w - margin - right_w, hud.bottom + 12, right_w, 82)
-    attitude_h = min(154, max(132, screen_h // 5))
+    right_w = min(px(320), max(px(250), screen_w // 4))
+    memory = pygame.Rect(
+        screen_w - margin - right_w,
+        hud.bottom + px(12),
+        right_w,
+        px(82),
+    )
+    attitude_h = min(px(154), max(px(132), screen_h // 5))
     attitudes = pygame.Rect(
         screen_w - margin - right_w,
-        memory.bottom + 10,
+        memory.bottom + px(10),
         right_w,
         attitude_h,
     )
-    if screen_w < 1000:
-        objective_w = max(280, min(420, screen_w - right_w - margin * 3))
+    if screen_w < px(1000):
+        objective_w = max(
+            px(280), min(px(420), screen_w - right_w - margin * 3)
+        )
         objective_x = margin
     else:
-        objective_w = min(420, max(300, screen_w // 3))
+        objective_w = min(px(420), max(px(300), screen_w // 3))
         objective_x = (screen_w - objective_w) // 2
     objective = pygame.Rect(
         objective_x,
-        hud.bottom + 12,
+        hud.bottom + px(12),
         objective_w,
-        72,
+        px(72),
     )
-    dialogue_h = min(196, max(164, screen_h // 4))
+    dialogue_h = min(px(196), max(px(164), screen_h // 4))
     dialogue = pygame.Rect(
         margin,
         screen_h - margin - dialogue_h,
         screen_w - margin * 2,
         dialogue_h,
     )
-    recall_w = min(500, max(360, screen_w - right_w - margin * 3))
-    recall = pygame.Rect(margin, hud.bottom + 12, recall_w, 120)
-    objective_with_recall = pygame.Rect(
-        margin if screen_w < 1000 else max(margin, screen_w - margin - objective_w),
-        recall.bottom + 12 if screen_w < 1000 else min(screen_h - 260, attitudes.bottom + 12),
-        objective_w,
-        72,
+    recall_w = min(
+        px(500), max(px(360), screen_w - right_w - margin * 3)
     )
-    menu = pygame.Rect(margin, hud.bottom + 22, min(320, screen_w - margin * 2), 300)
+    recall = pygame.Rect(margin, hud.bottom + px(12), recall_w, px(120))
+    objective_with_recall = pygame.Rect(
+        margin
+        if screen_w < px(1000)
+        else max(margin, screen_w - margin - objective_w),
+        recall.bottom + px(12)
+        if screen_w < px(1000)
+        else min(screen_h - px(260), attitudes.bottom + px(12)),
+        objective_w,
+        px(72),
+    )
+    menu = pygame.Rect(
+        margin,
+        hud.bottom + px(22),
+        min(px(320), screen_w - margin * 2),
+        px(300),
+    )
     tutorial = pygame.Rect(
         margin * 2,
         margin * 2,
         screen_w - margin * 4,
         screen_h - margin * 4,
     )
-    loading = pygame.Rect(0, 0, min(360, screen_w - margin * 2), 72)
+    loading = pygame.Rect(
+        0, 0, min(px(360), screen_w - margin * 2), px(72)
+    )
     loading.center = (screen_w // 2, screen_h // 2)
     return UILayout(
         margin,
@@ -240,6 +287,16 @@ def compute_ui_layout(screen_w: int, screen_h: int) -> UILayout:
         tutorial,
         loading,
     )
+
+
+def log_display_metrics(metrics: RenderMetrics, browser_mode: bool) -> None:
+    """Console-only resolution trace for fullscreen/browser diagnosis."""
+    print(f"[display] screen size: {metrics.screen_w} x {metrics.screen_h}")
+    print(
+        f"[display] internal world: {metrics.internal_w} x "
+        f"{metrics.internal_h}"
+    )
+    print(f"[display] browser_mode={browser_mode}")
 
 
 def get_attitude_color(attitude: str) -> tuple[int, int, int]:
@@ -1082,18 +1139,26 @@ def draw_npc_attitude_icons(
     world_scale: tuple[float, float],
 ) -> None:
     scale_x, scale_y = world_scale
+    screen_w, screen_h = surface.get_size()
+    ui_scale = compute_ui_scale(screen_w, screen_h)
+    badge_size = round(26 * ui_scale)
     for npc in npcs:
         npc_screen_x = (npc.tile_pos[0] * TILE_SIZE - camera.x) * scale_x
         npc_screen_y = (npc.tile_pos[1] * TILE_SIZE - camera.y) * scale_y
-        badge = pygame.Rect(0, 0, 26, 26)
-        badge.center = (round(npc_screen_x + 60), round(npc_screen_y + 2))
+        badge = pygame.Rect(0, 0, badge_size, badge_size)
+        badge.center = (
+            round(npc_screen_x + 60 * ui_scale),
+            round(npc_screen_y + 2 * ui_scale),
+        )
         if not surface.get_rect().colliderect(badge):
             continue
 
         attitude = npc_attitudes.get(npc.key, "neutral")
         attitude_color = get_attitude_color(attitude)
         pygame.draw.rect(surface, (14, 19, 26), badge)
-        pygame.draw.rect(surface, attitude_color, badge, 2)
+        pygame.draw.rect(
+            surface, attitude_color, badge, max(1, round(2 * ui_scale))
+        )
         icon_image = font.render(
             get_attitude_icon(attitude),
             True,
@@ -1107,13 +1172,17 @@ def draw_village_attitude_panel(
     summary: str,
     font: pygame.font.Font,
 ) -> None:
+    screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     panel = compute_ui_layout(*surface.get_size()).attitudes
     pygame.draw.rect(surface, (13, 18, 24), panel)
-    pygame.draw.rect(surface, (220, 205, 157), panel, 3)
-    pygame.draw.rect(surface, (73, 85, 84), panel.inflate(-8, -8), 1)
+    pygame.draw.rect(surface, (220, 205, 157), panel, px(3))
+    pygame.draw.rect(
+        surface, (73, 85, 84), panel.inflate(-px(8), -px(8)), px(1)
+    )
 
     title_image = font.render("Village Attitude", True, (247, 205, 104))
-    surface.blit(title_image, (panel.x + 12, panel.y + 9))
+    surface.blit(title_image, (panel.x + px(12), panel.y + px(9)))
 
     for index, line in enumerate(summary.splitlines()[:5]):
         _, _, attitude = line.rpartition(": ")
@@ -1122,7 +1191,10 @@ def draw_village_attitude_panel(
         line_image = font.render(f"{icon} {line}", True, attitude_color)
         surface.blit(
             line_image,
-            (panel.x + 12, panel.y + 38 + index * font.get_linesize()),
+            (
+                panel.x + px(12),
+                panel.y + px(38) + index * font.get_linesize(),
+            ),
         )
 
 
@@ -1137,11 +1209,14 @@ def draw_hud(
     small_font: pygame.font.Font,
 ) -> None:
     screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(screen_w, screen_h)
     panel = layout.hud
     pygame.draw.rect(surface, (13, 18, 24), panel)
-    pygame.draw.rect(surface, (220, 205, 157), panel, 3)
-    pygame.draw.rect(surface, (73, 85, 84), panel.inflate(-12, -12), 2)
+    pygame.draw.rect(surface, (220, 205, 157), panel, px(3))
+    pygame.draw.rect(
+        surface, (73, 85, 84), panel.inflate(-px(12), -px(12)), px(2)
+    )
 
     title_image = title_font.render("EchoWorld", True, (247, 205, 104))
     day_image = ui_font.render(f"Day {day}", True, (237, 237, 220))
@@ -1157,10 +1232,13 @@ def draw_hud(
         (181, 190, 185),
     )
 
-    content_x = panel.x + 18
-    surface.blit(title_image, (content_x, panel.y + 12))
-    surface.blit(day_image, (content_x + min(250, panel.width // 4), panel.y + 20))
-    surface.blit(nearby_image, (content_x, panel.y + 58))
+    content_x = panel.x + px(18)
+    surface.blit(title_image, (content_x, panel.y + px(12)))
+    surface.blit(
+        day_image,
+        (content_x + min(px(250), panel.width // 4), panel.y + px(20)),
+    )
+    surface.blit(nearby_image, (content_x, panel.y + px(58)))
     if nearby_npc is not None:
         nearby_attitude = npc_attitudes.get(nearby_npc.key, "neutral")
         attitude_image = ui_font.render(
@@ -1168,26 +1246,41 @@ def draw_hud(
             True,
             get_attitude_color(nearby_attitude),
         )
-        attitude_x = min(panel.right - attitude_image.get_width() - 18, content_x + 534)
-        surface.blit(attitude_image, (attitude_x, panel.y + 58))
+        attitude_x = min(
+            panel.right - attitude_image.get_width() - px(18),
+            content_x + px(534),
+        )
+        surface.blit(attitude_image, (attitude_x, panel.y + px(58)))
     controls_text = (
         "Move: WASD/Arrows | E: Interact | N: End Day | R: Reset | Esc: Cancel"
-        if screen_w < 1100
+        if screen_w < px(1100)
         else "Move: WASD/Arrows | Interact: E | End Day: N | Reset: R | Esc: Cancel"
     )
     controls = small_font.render(controls_text, True, (181, 190, 185))
-    surface.blit(controls, (content_x, panel.bottom - controls.get_height() - 10))
+    surface.blit(
+        controls,
+        (content_x, panel.bottom - controls.get_height() - px(10)),
+    )
 
     status_panel = layout.memory
     pygame.draw.rect(surface, (13, 18, 24), status_panel)
-    pygame.draw.rect(surface, (220, 205, 157), status_panel, 3)
-    pygame.draw.rect(surface, (73, 85, 84), status_panel.inflate(-8, -8), 1)
+    pygame.draw.rect(surface, (220, 205, 157), status_panel, px(3))
+    pygame.draw.rect(
+        surface,
+        (73, 85, 84),
+        status_panel.inflate(-px(8), -px(8)),
+        px(1),
+    )
     status_title = small_font.render("Memory", True, (247, 205, 104))
-    surface.blit(status_title, (status_panel.x + 12, status_panel.y + 9))
+    surface.blit(
+        status_title, (status_panel.x + px(12), status_panel.y + px(9))
+    )
 
     status_text = memory_status_label(last_api_event)
     status_image = small_font.render(status_text, True, (198, 218, 190))
-    surface.blit(status_image, (status_panel.x + 12, status_panel.y + 43))
+    surface.blit(
+        status_image, (status_panel.x + px(12), status_panel.y + px(43))
+    )
 
 
 def draw_interaction_hint(
@@ -1197,16 +1290,17 @@ def draw_interaction_hint(
 ) -> None:
     hint = f"Press E to talk to {nearby_npc.display_name}"
     hint_image = small_font.render(hint, True, (247, 241, 213))
-    box = hint_image.get_rect()
-    box.width += 28
-    box.height += 20
     screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
+    box = hint_image.get_rect()
+    box.width += px(28)
+    box.height += px(20)
     layout = compute_ui_layout(screen_w, screen_h)
     box.centerx = screen_w // 2
-    box.bottom = layout.dialogue.y - 12
+    box.bottom = layout.dialogue.y - px(12)
     pygame.draw.rect(surface, (16, 20, 28), box)
-    pygame.draw.rect(surface, (224, 207, 154), box, 3)
-    surface.blit(hint_image, (box.x + 14, box.y + 10))
+    pygame.draw.rect(surface, (224, 207, 154), box, px(3))
+    surface.blit(hint_image, (box.x + px(14), box.y + px(10)))
 
 
 def draw_title_screen(
@@ -1216,27 +1310,38 @@ def draw_title_screen(
     prompt_font: pygame.font.Font,
 ) -> None:
     screen_w, screen_h = surface.get_size()
+    ui_scale = compute_ui_scale(screen_w, screen_h)
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(screen_w, screen_h)
     surface.fill((12, 22, 24))
-    for y in range(0, screen_h, 48):
-        for x in range(0, screen_w, 48):
-            color = (18, 45, 37) if (x // 48 + y // 48) % 2 == 0 else (20, 51, 41)
-            pygame.draw.rect(surface, color, (x, y, 48, 48))
+    grid_size = px(48)
+    for y in range(0, screen_h, grid_size):
+        for x in range(0, screen_w, grid_size):
+            color = (
+                (18, 45, 37)
+                if (x // grid_size + y // grid_size) % 2 == 0
+                else (20, 51, 41)
+            )
+            pygame.draw.rect(surface, color, (x, y, grid_size, grid_size))
 
-    panel_w = min(900, screen_w - layout.margin * 4)
-    panel_h = min(520, screen_h - layout.margin * 4)
+    panel_w = min(round(900 * ui_scale), screen_w - layout.margin * 4)
+    panel_h = min(round(520 * ui_scale), screen_h - layout.margin * 4)
     panel = pygame.Rect(0, 0, panel_w, panel_h)
     panel.center = (screen_w // 2, screen_h // 2)
     pygame.draw.rect(surface, (14, 19, 26), panel)
-    pygame.draw.rect(surface, (230, 210, 150), panel, 5)
-    pygame.draw.rect(surface, (76, 91, 86), panel.inflate(-18, -18), 3)
+    pygame.draw.rect(surface, (230, 210, 150), panel, px(5))
+    pygame.draw.rect(
+        surface, (76, 91, 86), panel.inflate(-px(18), -px(18)), px(3)
+    )
 
     title_image = title_font.render("EchoWorld", True, (247, 205, 104))
     description = (
         "A memory-driven RPG where NPCs remember, gossip, forgive, and hold "
         "promises against you."
     )
-    description_lines = wrap_text(description, subtitle_font, panel.width - 110)
+    description_lines = wrap_text(
+        description, subtitle_font, panel.width - px(110)
+    )
     powered_image = subtitle_font.render(
         "Powered by Cognee.", True, (95, 235, 210)
     )
@@ -1303,16 +1408,26 @@ def draw_loading_overlay(
     message: str,
     font: pygame.font.Font,
 ) -> None:
+    screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     panel = compute_ui_layout(*surface.get_size()).loading
     pygame.draw.rect(surface, (14, 19, 26), panel)
-    pygame.draw.rect(surface, (230, 210, 150), panel, 4)
-    pygame.draw.rect(surface, (76, 91, 86), panel.inflate(-12, -12), 2)
+    pygame.draw.rect(surface, (230, 210, 150), panel, px(4))
+    pygame.draw.rect(
+        surface, (76, 91, 86), panel.inflate(-px(12), -px(12)), px(2)
+    )
     image = font.render(message, True, (247, 241, 213))
     surface.blit(image, image.get_rect(center=panel.center))
 
 
 def draw_echo_guide_portrait(surface: pygame.Surface, rect: pygame.Rect) -> None:
     """Draw an original Cognee-themed memory-guide portrait."""
+    # The mascot is non-text artwork, so draw it once at its design resolution
+    # and scale that illustration independently from the native-resolution UI.
+    target_surface = surface
+    target_rect = rect.copy()
+    surface = pygame.Surface((280, 360), pygame.SRCALPHA)
+    rect = surface.get_rect()
     pygame.draw.rect(surface, (8, 24, 35), rect, border_radius=18)
     pygame.draw.rect(surface, (42, 208, 186), rect, 3, border_radius=18)
     glow = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -1380,6 +1495,11 @@ def draw_echo_guide_portrait(surface: pygame.Surface, rect: pygame.Rect) -> None
         pygame.draw.circle(surface, (45, 212, 191), (node_x, node_y), 9)
         pygame.draw.circle(surface, (221, 255, 242), (node_x, node_y), 3)
 
+    target_surface.blit(
+        pygame.transform.smoothscale(surface, target_rect.size),
+        target_rect,
+    )
+
 
 def draw_tutorial_popup(
     surface: pygame.Surface,
@@ -1390,64 +1510,92 @@ def draw_tutorial_popup(
 ) -> None:
     """Draw the modal Echo Guide onboarding card above every game layer."""
     screen_w, screen_h = surface.get_size()
+    scale = compute_ui_scale(screen_w, screen_h)
+    px = lambda value: max(1, round(value * scale))
     layout = compute_ui_layout(screen_w, screen_h)
     shade = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
     shade.fill((2, 8, 16, 190))
     surface.blit(shade, (0, 0))
 
     panel = layout.tutorial.copy()
-    panel.width = min(panel.width, 1040)
-    panel.height = min(panel.height, 620)
+    panel.width = min(panel.width, px(1040))
+    panel.height = min(panel.height, px(620))
     panel.center = (screen_w // 2, screen_h // 2)
-    pygame.draw.rect(surface, (8, 19, 29), panel, border_radius=22)
-    pygame.draw.rect(surface, (87, 231, 205), panel, 5, border_radius=22)
-    pygame.draw.rect(surface, (37, 91, 104), panel.inflate(-18, -18), 2, border_radius=16)
+    pygame.draw.rect(surface, (8, 19, 29), panel, border_radius=px(22))
+    pygame.draw.rect(
+        surface, (87, 231, 205), panel, px(5), border_radius=px(22)
+    )
+    pygame.draw.rect(
+        surface,
+        (37, 91, 104),
+        panel.inflate(-px(18), -px(18)),
+        px(2),
+        border_radius=px(16),
+    )
 
-    portrait_width = max(210, min(280, round(panel.width * 0.29)))
+    portrait_width = max(px(210), min(px(280), round(panel.width * 0.29)))
     portrait_rect = pygame.Rect(
-        panel.x + 24,
-        panel.y + 28,
+        panel.x + px(24),
+        panel.y + px(28),
         portrait_width,
-        max(330, panel.height - 114),
+        max(px(330), panel.height - px(114)),
     )
     draw_echo_guide_portrait(surface, portrait_rect)
     name_plate = pygame.Rect(
-        portrait_rect.x + 12,
-        portrait_rect.bottom + 8,
-        portrait_rect.width - 24,
-        38,
+        portrait_rect.x + px(12),
+        portrait_rect.bottom + px(8),
+        portrait_rect.width - px(24),
+        px(38),
     )
-    pygame.draw.rect(surface, (14, 65, 79), name_plate, border_radius=10)
-    pygame.draw.rect(surface, (82, 224, 204), name_plate, 2, border_radius=10)
+    pygame.draw.rect(
+        surface, (14, 65, 79), name_plate, border_radius=px(10)
+    )
+    pygame.draw.rect(
+        surface, (82, 224, 204), name_plate, px(2), border_radius=px(10)
+    )
     name_image = small_font.render("ECHO GUIDE", True, (225, 255, 244))
     surface.blit(name_image, name_image.get_rect(center=name_plate.center))
 
-    speech_x = portrait_rect.right + 26
+    speech_x = portrait_rect.right + px(26)
     speech = pygame.Rect(
         speech_x,
-        panel.y + 32,
-        panel.right - speech_x - 24,
-        panel.height - 102,
+        panel.y + px(32),
+        panel.right - speech_x - px(24),
+        panel.height - px(102),
     )
-    pygame.draw.rect(surface, (230, 247, 241), speech, border_radius=18)
-    pygame.draw.rect(surface, (67, 204, 190), speech, 4, border_radius=18)
+    pygame.draw.rect(
+        surface, (230, 247, 241), speech, border_radius=px(18)
+    )
+    pygame.draw.rect(
+        surface, (67, 204, 190), speech, px(4), border_radius=px(18)
+    )
     pygame.draw.polygon(
         surface,
         (230, 247, 241),
-        [(speech.x, speech.y + 112), (speech.x - 24, speech.y + 130), (speech.x, speech.y + 145)],
+        [
+            (speech.x, speech.y + px(112)),
+            (speech.x - px(24), speech.y + px(130)),
+            (speech.x, speech.y + px(145)),
+        ],
     )
     title = str(page.get("title") or "Echo Guide")
     title_image = title_font.render(title, True, (9, 64, 77))
-    surface.blit(title_image, (speech.x + 24, speech.y + 22))
+    surface.blit(title_image, (speech.x + px(24), speech.y + px(22)))
 
     body = " ".join(str(page.get("body") or "").split())
-    max_body_lines = max(5, (speech.height - 110) // (body_font.get_linesize() + 3))
-    body_lines = wrap_text(body, body_font, speech.width - 48)[:max_body_lines]
-    line_y = speech.y + 78
+    max_body_lines = max(
+        5,
+        (speech.height - px(110))
+        // (body_font.get_linesize() + px(3)),
+    )
+    body_lines = wrap_text(body, body_font, speech.width - px(48))[
+        :max_body_lines
+    ]
+    line_y = speech.y + px(78)
     for line in body_lines:
         line_image = body_font.render(line, True, (20, 42, 49))
-        surface.blit(line_image, (speech.x + 24, line_y))
-        line_y += body_font.get_linesize() + 3
+        surface.blit(line_image, (speech.x + px(24), line_y))
+        line_y += body_font.get_linesize() + px(3)
 
     page_count = int(page.get("page_count") or 1)
     page_index = int(page.get("page_index") or 0)
@@ -1457,7 +1605,10 @@ def draw_tutorial_popup(
         True,
         (182, 231, 220),
     )
-    surface.blit(footer, footer.get_rect(center=(panel.centerx, panel.bottom - 28)))
+    surface.blit(
+        footer,
+        footer.get_rect(center=(panel.centerx, panel.bottom - px(28))),
+    )
 
 
 def draw_tutorial_objective_panel(
@@ -1468,20 +1619,30 @@ def draw_tutorial_objective_panel(
     recall_visible: bool,
 ) -> None:
     objective = str(step.get("objective") or "Follow the Echo Guide.")
+    screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(*surface.get_size())
     panel = (
         layout.objective_with_recall.copy()
         if recall_visible
         else layout.objective.copy()
     )
-    pygame.draw.rect(surface, (7, 20, 30), panel, border_radius=10)
-    pygame.draw.rect(surface, (63, 218, 196), panel, 3, border_radius=10)
+    pygame.draw.rect(surface, (7, 20, 30), panel, border_radius=px(10))
+    pygame.draw.rect(
+        surface, (63, 218, 196), panel, px(3), border_radius=px(10)
+    )
     title = small_font.render("CURRENT OBJECTIVE", True, (95, 235, 210))
-    surface.blit(title, (panel.x + 13, panel.y + 8))
-    objective_lines = wrap_text(objective, font, panel.width - 26)[:2]
+    surface.blit(title, (panel.x + px(13), panel.y + px(8)))
+    objective_lines = wrap_text(objective, font, panel.width - px(26))[:2]
     for index, line in enumerate(objective_lines):
         image = font.render(line, True, (234, 245, 237))
-        surface.blit(image, (panel.x + 13, panel.y + 32 + index * font.get_linesize()))
+        surface.blit(
+            image,
+            (
+                panel.x + px(13),
+                panel.y + px(32) + index * font.get_linesize(),
+            ),
+        )
 
 
 def get_tutorial_target_position(
@@ -1525,21 +1686,26 @@ def draw_tutorial_arrow(
     )
     label = str(step.get("waypoint_label") or "Next objective")
     screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(screen_w, screen_h)
 
     if step.get("target_type") == "day_end":
-        highlight = pygame.Rect(0, 0, 250, 33)
-        highlight.center = (screen_w // 2, layout.hud.bottom - 24)
-        pygame.draw.rect(surface, (8, 25, 35), highlight, border_radius=8)
-        pygame.draw.rect(surface, color, highlight, 3, border_radius=8)
-        arrow_y = highlight.y - 13 + round(pulse * 5)
+        highlight = pygame.Rect(0, 0, px(250), px(33))
+        highlight.center = (screen_w // 2, layout.hud.bottom - px(24))
+        pygame.draw.rect(
+            surface, (8, 25, 35), highlight, border_radius=px(8)
+        )
+        pygame.draw.rect(
+            surface, color, highlight, px(3), border_radius=px(8)
+        )
+        arrow_y = highlight.y - px(13) + round(pulse * px(5))
         pygame.draw.polygon(
             surface,
             color,
             [
-                (highlight.centerx, arrow_y + 13),
-                (highlight.centerx - 13, arrow_y - 3),
-                (highlight.centerx + 13, arrow_y - 3),
+                (highlight.centerx, arrow_y + px(13)),
+                (highlight.centerx - px(13), arrow_y - px(3)),
+                (highlight.centerx + px(13), arrow_y - px(3)),
             ],
         )
         image = font.render("Press N — End the Day", True, (230, 252, 241))
@@ -1547,36 +1713,56 @@ def draw_tutorial_arrow(
         return
 
     covered_by_right_panels = (
-        target.x >= layout.memory.x - 12
-        and layout.memory.y - 12 <= target.y <= layout.attitudes.bottom + 12
+        target.x >= layout.memory.x - px(12)
+        and layout.memory.y - px(12)
+        <= target.y
+        <= layout.attitudes.bottom + px(12)
     )
     on_screen = (
-        42 <= target.x <= screen_w - 42
-        and layout.hud.bottom + 18 <= target.y <= layout.dialogue.y - 28
+        px(42) <= target.x <= screen_w - px(42)
+        and layout.hud.bottom + px(18)
+        <= target.y
+        <= layout.dialogue.y - px(28)
         and not covered_by_right_panels
     )
     if on_screen:
-        ring = pygame.Rect(0, 0, 58 + round(8 * pulse), 25 + round(4 * pulse))
-        ring.center = (round(target.x), round(target.y + 25))
-        pygame.draw.ellipse(surface, color, ring, 3)
-        bounce = round(pulse * 8)
-        tip_y = round(target.y - 34 - bounce)
+        ring = pygame.Rect(
+            0,
+            0,
+            px(58) + round(px(8) * pulse),
+            px(25) + round(px(4) * pulse),
+        )
+        ring.center = (round(target.x), round(target.y + px(25)))
+        pygame.draw.ellipse(surface, color, ring, px(3))
+        bounce = round(pulse * px(8))
+        tip_y = round(target.y - px(34) - bounce)
         pygame.draw.polygon(
             surface,
             color,
             [
-                (round(target.x), tip_y + 16),
-                (round(target.x - 14), tip_y - 2),
-                (round(target.x + 14), tip_y - 2),
+                (round(target.x), tip_y + px(16)),
+                (round(target.x - px(14)), tip_y - px(2)),
+                (round(target.x + px(14)), tip_y - px(2)),
             ],
         )
         label_image = font.render(label, True, (230, 252, 241))
-        label_panel = label_image.get_rect(midbottom=(round(target.x), tip_y - 8)).inflate(18, 10)
+        label_panel = label_image.get_rect(
+            midbottom=(round(target.x), tip_y - px(8))
+        ).inflate(px(18), px(10))
         label_panel.clamp_ip(
-            pygame.Rect(8, layout.hud.bottom + 8, screen_w - 16, max(1, layout.dialogue.y - layout.hud.bottom - 16))
+            pygame.Rect(
+                px(8),
+                layout.hud.bottom + px(8),
+                screen_w - px(16),
+                max(1, layout.dialogue.y - layout.hud.bottom - px(16)),
+            )
         )
-        pygame.draw.rect(surface, (7, 22, 31), label_panel, border_radius=7)
-        pygame.draw.rect(surface, color, label_panel, 2, border_radius=7)
+        pygame.draw.rect(
+            surface, (7, 22, 31), label_panel, border_radius=px(7)
+        )
+        pygame.draw.rect(
+            surface, color, label_panel, px(2), border_radius=px(7)
+        )
         surface.blit(label_image, label_image.get_rect(center=label_panel.center))
         return
 
@@ -1585,30 +1771,45 @@ def draw_tutorial_arrow(
     if direction.length_squared() == 0:
         direction = pygame.Vector2(0, -1)
     direction = direction.normalize()
-    scale_x = max(80, screen_w / 2 - 65) / max(abs(direction.x), 0.001)
-    scale_y = max(60, (layout.dialogue.y - layout.hud.bottom) / 2 - 45) / max(abs(direction.y), 0.001)
+    scale_x = max(px(80), screen_w / 2 - px(65)) / max(abs(direction.x), 0.001)
+    scale_y = max(
+        px(60), (layout.dialogue.y - layout.hud.bottom) / 2 - px(45)
+    ) / max(abs(direction.y), 0.001)
     edge = center + direction * min(scale_x, scale_y)
-    if direction.x > 0 and edge.y <= layout.attitudes.bottom + 24:
-        edge.x = min(edge.x, layout.memory.x - 40)
+    if direction.x > 0 and edge.y <= layout.attitudes.bottom + px(24):
+        edge.x = min(edge.x, layout.memory.x - px(40))
     perpendicular = pygame.Vector2(-direction.y, direction.x)
-    tip = edge + direction * 17
-    base = edge - direction * 16
+    tip = edge + direction * px(17)
+    base = edge - direction * px(16)
     pygame.draw.polygon(
         surface,
         color,
         [
             (round(tip.x), round(tip.y)),
-            (round((base + perpendicular * 13).x), round((base + perpendicular * 13).y)),
-            (round((base - perpendicular * 13).x), round((base - perpendicular * 13).y)),
+            (
+                round((base + perpendicular * px(13)).x),
+                round((base + perpendicular * px(13)).y),
+            ),
+            (
+                round((base - perpendicular * px(13)).x),
+                round((base - perpendicular * px(13)).y),
+            ),
         ],
     )
     label_image = font.render(label, True, (230, 252, 241))
-    label_panel = label_image.get_rect(center=(round(edge.x), round(edge.y + 34))).inflate(16, 8)
+    label_panel = label_image.get_rect(
+        center=(round(edge.x), round(edge.y + px(34)))
+    ).inflate(px(16), px(8))
     label_panel.clamp_ip(
-        pygame.Rect(8, layout.hud.bottom + 8, screen_w - 16, max(1, layout.dialogue.y - layout.hud.bottom - 16))
+        pygame.Rect(
+            px(8),
+            layout.hud.bottom + px(8),
+            screen_w - px(16),
+            max(1, layout.dialogue.y - layout.hud.bottom - px(16)),
+        )
     )
-    pygame.draw.rect(surface, (7, 22, 31), label_panel, border_radius=7)
-    pygame.draw.rect(surface, color, label_panel, 2, border_radius=7)
+    pygame.draw.rect(surface, (7, 22, 31), label_panel, border_radius=px(7))
+    pygame.draw.rect(surface, color, label_panel, px(2), border_radius=px(7))
     surface.blit(label_image, label_image.get_rect(center=label_panel.center))
 
 
@@ -1807,32 +2008,36 @@ def draw_recall_notification(
         title_font.set_bold(True)
     body_font = body_font or pygame.font.Font(None, 19)
     lines = build_recall_display_lines(safe_trace)
+    screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
 
     panel_height = max(
-        120,
-        min(180, 58 + len(lines) * body_font.get_linesize()),
+        px(120),
+        min(px(180), px(58) + len(lines) * body_font.get_linesize()),
     )
     panel = compute_ui_layout(*surface.get_size()).recall
     panel.height = panel_height
-    shadow = panel.move(5, 5)
+    shadow = panel.move(px(5), px(5))
     pygame.draw.rect(surface, (4, 8, 12), shadow)
     pygame.draw.rect(surface, (12, 18, 25), panel)
-    pygame.draw.rect(surface, (222, 214, 174), panel, 3)
-    pygame.draw.rect(surface, (68, 83, 83), panel.inflate(-10, -10), 1)
+    pygame.draw.rect(surface, (222, 214, 174), panel, px(3))
+    pygame.draw.rect(
+        surface, (68, 83, 83), panel.inflate(-px(10), -px(10)), px(1)
+    )
 
     title = str(safe_trace.get("title") or "[RECALL]")
     title_image = title_font.render(title, True, (247, 205, 104))
-    surface.blit(title_image, (panel.x + 14, panel.y + 10))
+    surface.blit(title_image, (panel.x + px(14), panel.y + px(10)))
 
     debug_signature = (id(trace), tuple(lines))
     if getattr(draw_recall_notification, "_debug_signature", None) != debug_signature:
         print("[recall-ui-lines]", lines)
         draw_recall_notification._debug_signature = debug_signature
 
-    line_y = panel.y + 42
+    line_y = panel.y + px(42)
     for line in lines:
         line_image = body_font.render(line, True, (226, 232, 218))
-        surface.blit(line_image, (panel.x + 14, line_y))
+        surface.blit(line_image, (panel.x + px(14), line_y))
         line_y += body_font.get_linesize()
 
 
@@ -1877,6 +2082,7 @@ def draw_day_night_transition(
         message = "A new day approaches..."
 
     screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(screen_w, screen_h)
     shade = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
     shade.fill((8, 15, 48, darkness))
@@ -1894,50 +2100,52 @@ def draw_day_night_transition(
             pygame.draw.rect(
                 surface,
                 (207, 220, 224),
-                (round(star_x), round(star_y), 4, 4),
+                (round(star_x), round(star_y), px(4), px(4)),
             )
 
     if body == "sunset":
         sun_position = arc_position(
             0.5 + local_progress * 0.5,
-            screen_w - 60,
-            60,
+            screen_w - px(60),
+            px(60),
             screen_h * 0.58,
             screen_h * 0.32,
         )
-        pygame.draw.circle(surface, (119, 68, 35), sun_position, 39)
-        pygame.draw.circle(surface, (247, 174, 61), sun_position, 33)
+        pygame.draw.circle(surface, (119, 68, 35), sun_position, px(39))
+        pygame.draw.circle(surface, (247, 174, 61), sun_position, px(33))
     elif body == "moon":
         moon_position = arc_position(
             local_progress,
-            screen_w - 60,
-            60,
+            screen_w - px(60),
+            px(60),
             screen_h * 0.58,
             screen_h * 0.32,
         )
-        pygame.draw.circle(surface, (204, 218, 229), moon_position, 32)
+        pygame.draw.circle(surface, (204, 218, 229), moon_position, px(32))
         pygame.draw.circle(
             surface,
             (31, 43, 76),
-            (moon_position[0] + 13, moon_position[1] - 8),
-            27,
+            (moon_position[0] + px(13), moon_position[1] - px(8)),
+            px(27),
         )
     else:
         sun_position = arc_position(
             local_progress * 0.35,
-            screen_w - 60,
-            60,
+            screen_w - px(60),
+            px(60),
             screen_h * 0.58,
             screen_h * 0.32,
         )
-        pygame.draw.circle(surface, (132, 73, 34), sun_position, 39)
-        pygame.draw.circle(surface, (251, 193, 70), sun_position, 33)
+        pygame.draw.circle(surface, (132, 73, 34), sun_position, px(39))
+        pygame.draw.circle(surface, (251, 193, 70), sun_position, px(33))
 
-    message_panel = pygame.Rect(0, 0, min(620, screen_w - 48), 68)
+    message_panel = pygame.Rect(
+        0, 0, min(px(620), screen_w - px(48)), px(68)
+    )
     message_panel.centerx = screen_w // 2
     message_panel.bottom = layout.dialogue.bottom
     pygame.draw.rect(surface, (14, 19, 26), message_panel)
-    pygame.draw.rect(surface, (230, 210, 150), message_panel, 4)
+    pygame.draw.rect(surface, (230, 210, 150), message_panel, px(4))
     message_image = font.render(message, True, (247, 241, 213))
     surface.blit(message_image, message_image.get_rect(center=message_panel.center))
 
@@ -1949,6 +2157,7 @@ def draw_endday_morning_hold(
 ) -> None:
     """Keep a lively morning frame visible while the backend finishes."""
     screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
     layout = compute_ui_layout(screen_w, screen_h)
     morning_glow = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
     morning_glow.fill((255, 196, 104, 34))
@@ -1956,20 +2165,22 @@ def draw_endday_morning_hold(
 
     sun_position = arc_position(
         0.35,
-        screen_w - 60,
-        60,
+        screen_w - px(60),
+        px(60),
         screen_h * 0.58,
         screen_h * 0.32,
     )
-    pygame.draw.circle(surface, (132, 73, 34), sun_position, 39)
-    pygame.draw.circle(surface, (251, 193, 70), sun_position, 33)
+    pygame.draw.circle(surface, (132, 73, 34), sun_position, px(39))
+    pygame.draw.circle(surface, (251, 193, 70), sun_position, px(33))
 
     # Small drifting memory motes keep the hold frame alive without replaying it.
     for index in range(12):
         drift = (hold_elapsed_ms * 0.035 + index * 61) % 330
-        particle_x = 60 + ((index * 97) % max(120, screen_w - 120))
+        particle_x = px(60) + (
+            (index * px(97)) % max(px(120), screen_w - px(120))
+        )
         particle_y = round(screen_h * 0.72 - drift)
-        particle_size = 3 if index % 3 else 5
+        particle_size = px(3) if index % 3 else px(5)
         pygame.draw.rect(
             surface,
             (232, 214, 143),
@@ -1985,11 +2196,13 @@ def draw_endday_morning_hold(
     dots = "." * (1 + (hold_elapsed_ms // 450) % 3)
     message = f"{messages[message_index]}{dots}"
 
-    message_panel = pygame.Rect(0, 0, min(620, screen_w - 48), 68)
+    message_panel = pygame.Rect(
+        0, 0, min(px(620), screen_w - px(48)), px(68)
+    )
     message_panel.centerx = screen_w // 2
     message_panel.bottom = layout.dialogue.bottom
     pygame.draw.rect(surface, (14, 19, 26), message_panel)
-    pygame.draw.rect(surface, (230, 210, 150), message_panel, 4)
+    pygame.draw.rect(surface, (230, 210, 150), message_panel, px(4))
     message_image = font.render(message, True, (247, 241, 213))
     surface.blit(message_image, message_image.get_rect(center=message_panel.center))
 
@@ -2006,6 +2219,9 @@ def draw_village_gossip_chatter(
     if not chatter_lines or not 0.40 <= animation_progress < 0.70:
         return
 
+    screen_w, screen_h = surface.get_size()
+    px = lambda value: ui_px(screen_w, screen_h, value)
+
     chatter_started_ms = round(ENDDAY_ANIMATION_MS * 0.40)
     chatter_elapsed_ms = max(0, elapsed_ms - chatter_started_ms)
     bubble_duration_ms = 1200
@@ -2014,42 +2230,54 @@ def draw_village_gossip_chatter(
     fade_in = min(1.0, bubble_age / 180)
     fade_out = min(1.0, (bubble_duration_ms - bubble_age) / 220)
     alpha = round(245 * min(fade_in, fade_out))
-    bob = round(math.sin(chatter_elapsed_ms * 0.009) * 3)
+    bob = round(math.sin(chatter_elapsed_ms * 0.009) * px(3))
 
-    bubble = pygame.Surface((420, 80), pygame.SRCALPHA)
+    bubble = pygame.Surface((px(420), px(80)), pygame.SRCALPHA)
     pygame.draw.rect(bubble, (10, 17, 25, 238), bubble.get_rect())
-    pygame.draw.rect(bubble, (222, 214, 174, 255), bubble.get_rect(), 3)
+    pygame.draw.rect(
+        bubble, (222, 214, 174, 255), bubble.get_rect(), px(3)
+    )
     pygame.draw.rect(
         bubble,
         (68, 83, 83, 255),
-        bubble.get_rect().inflate(-10, -10),
-        1,
+        bubble.get_rect().inflate(-px(10), -px(10)),
+        px(1),
     )
     heading = title_font.render("... village chatter ...", True, (247, 205, 104))
-    bubble.blit(heading, (12, 8))
+    bubble.blit(heading, (px(12), px(8)))
     text = " ".join(chatter_lines[line_index].split())
-    for text_index, line in enumerate(wrap_text(text, body_font, 394)[:2]):
+    for text_index, line in enumerate(
+        wrap_text(text, body_font, px(394))[:2]
+    ):
         image = body_font.render(line, True, (226, 232, 218))
-        bubble.blit(image, (12, 36 + text_index * body_font.get_linesize()))
+        bubble.blit(
+            image,
+            (px(12), px(36) + text_index * body_font.get_linesize()),
+        )
     bubble.set_alpha(alpha)
-    screen_w, screen_h = surface.get_size()
     bubble_x = (screen_w - bubble.get_width()) // 2
-    bubble_y = max(140, round(screen_h * 0.24)) + bob
+    bubble_y = max(px(140), round(screen_h * 0.24)) + bob
     surface.blit(bubble, (bubble_x, bubble_y))
 
     # Two tiny ellipsis bubbles suggest several overlapping conversations
     # without covering the gathered sprites with more text.
     for center in (
-        (screen_w // 2 - 74, round(screen_h * 0.47)),
-        (screen_w // 2 + 74, round(screen_h * 0.51)),
+        (screen_w // 2 - px(74), round(screen_h * 0.47)),
+        (screen_w // 2 + px(74), round(screen_h * 0.51)),
     ):
-        pygame.draw.circle(surface, (12, 18, 25), center, 17)
-        pygame.draw.circle(surface, (201, 192, 151), center, 17, 2)
+        pygame.draw.circle(surface, (12, 18, 25), center, px(17))
+        pygame.draw.circle(surface, (201, 192, 151), center, px(17), px(2))
+        ui_scale = compute_ui_scale(screen_w, screen_h)
         for dot_offset in (-7, 0, 7):
             pygame.draw.rect(
                 surface,
                 (232, 214, 143),
-                (center[0] + dot_offset - 2, center[1] - 2, 4, 4),
+                (
+                    center[0] + round(dot_offset * ui_scale) - px(2),
+                    center[1] - px(2),
+                    px(4),
+                    px(4),
+                ),
             )
 
 
@@ -2062,11 +2290,15 @@ async def run_game(browser_mode: bool = False) -> None:
     display_flags = pygame.RESIZABLE if browser_mode else 0
     window = pygame.display.set_mode(display_size, display_flags)
     render_metrics = compute_render_metrics(*display_size, browser_mode)
+    log_display_metrics(render_metrics, browser_mode)
     internal_surface = pygame.Surface(
         (render_metrics.internal_w, render_metrics.internal_h)
     )
     ui_layout = compute_ui_layout(*display_size)
-    DIALOGUE_TEXT_WIDTH = max(280, ui_layout.dialogue.width - 48)
+    DIALOGUE_TEXT_WIDTH = max(
+        ui_px(*display_size, 280),
+        ui_layout.dialogue.width - ui_px(*display_size, 48),
+    )
     clock = pygame.time.Clock()
 
     ui_fonts = create_ui_fonts(*display_size)
@@ -2194,11 +2426,15 @@ async def run_game(browser_mode: bool = False) -> None:
             if requested_size != window.get_size():
                 window = pygame.display.set_mode(requested_size, pygame.RESIZABLE)
                 render_metrics = compute_render_metrics(*requested_size, True)
+                log_display_metrics(render_metrics, True)
                 internal_surface = pygame.Surface(
                     (render_metrics.internal_w, render_metrics.internal_h)
                 )
                 ui_layout = compute_ui_layout(*requested_size)
-                DIALOGUE_TEXT_WIDTH = max(280, ui_layout.dialogue.width - 48)
+                DIALOGUE_TEXT_WIDTH = max(
+                    ui_px(*requested_size, 280),
+                    ui_layout.dialogue.width - ui_px(*requested_size, 48),
+                )
                 ui_fonts = create_ui_fonts(*requested_size)
                 hud_title_font = ui_fonts["hud_title"]
                 ui_font = ui_fonts["ui"]
@@ -2241,11 +2477,15 @@ async def run_game(browser_mode: bool = False) -> None:
                 resized = get_display_size(True)
                 window = pygame.display.set_mode(resized, pygame.RESIZABLE)
                 render_metrics = compute_render_metrics(*resized, True)
+                log_display_metrics(render_metrics, True)
                 internal_surface = pygame.Surface(
                     (render_metrics.internal_w, render_metrics.internal_h)
                 )
                 ui_layout = compute_ui_layout(*resized)
-                DIALOGUE_TEXT_WIDTH = max(280, ui_layout.dialogue.width - 48)
+                DIALOGUE_TEXT_WIDTH = max(
+                    ui_px(*resized, 280),
+                    ui_layout.dialogue.width - ui_px(*resized, 48),
+                )
                 ui_fonts = create_ui_fonts(*resized)
                 hud_title_font = ui_fonts["hud_title"]
                 ui_font = ui_fonts["ui"]
@@ -3189,8 +3429,8 @@ async def run_game(browser_mode: bool = False) -> None:
                 tutorial_state,
                 promise_state,
             )
-            menu_height = 44 + len(visible_menu_options) * (
-                menu_font.get_linesize() + 10
+            menu_height = ui_px(*screen_size, 44) + len(visible_menu_options) * (
+                menu_font.get_linesize() + ui_px(*screen_size, 10)
             )
             draw_menu_box(
                 window,

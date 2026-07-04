@@ -63,7 +63,7 @@ body { display:block!important; }
 #canvas { position:fixed!important; inset:0!important; display:block!important;
   width:100vw!important; height:100vh!important; max-width:none!important;
   max-height:none!important; margin:0!important; padding:0!important;
-  background:#05080d!important; image-rendering:auto; }
+  background:#05080d!important; image-rendering:auto!important; }
 #canvas3d { background:#05080d!important; }
 #transfer, #infobox { background:#05080d!important; color:#eafffb!important; }
 #echoworld-fullscreen { position:fixed; right:14px; bottom:14px; z-index:99999;

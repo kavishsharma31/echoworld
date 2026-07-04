@@ -182,6 +182,11 @@ def _wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
     return lines
 
 
+def _ui_scale(surface: pygame.Surface) -> float:
+    width, height = surface.get_size()
+    return max(1.0, min(3.0, min(width / 1280, height / 720)))
+
+
 def draw_dialogue_box(
     surface: pygame.Surface,
     rect: pygame.Rect | tuple[int, int, int, int],
@@ -192,29 +197,33 @@ def draw_dialogue_box(
     prompt: str = "Press Space/E to continue",
 ) -> None:
     box = pygame.Rect(rect)
+    scale = _ui_scale(surface)
+    px = lambda value: max(1, round(value * scale))
     pygame.draw.rect(surface, (16, 20, 28), box)
-    pygame.draw.rect(surface, (235, 222, 178), box, 4)
-    pygame.draw.rect(surface, (92, 104, 105), box.inflate(-14, -14), 2)
+    pygame.draw.rect(surface, (235, 222, 178), box, px(4))
+    pygame.draw.rect(
+        surface, (92, 104, 105), box.inflate(-px(14), -px(14)), px(2)
+    )
 
-    padding = 24
+    padding = px(24)
     title_image = font.render(title, True, (247, 205, 104))
-    title_position = (box.x + padding, box.y + 14)
+    title_position = (box.x + padding, box.y + px(14))
     surface.blit(title_image, title_position)
 
-    separator_y = title_position[1] + title_image.get_height() + 8
+    separator_y = title_position[1] + title_image.get_height() + px(8)
     pygame.draw.line(
         surface,
         (92, 104, 105),
         (box.x + padding, separator_y),
         (box.right - padding, separator_y),
-        2,
+        px(2),
     )
 
     prompt_image = small_font.render(prompt, True, (174, 184, 177))
-    prompt_y = box.bottom - prompt_image.get_height() - 14
-    text_y = separator_y + 12
+    prompt_y = box.bottom - prompt_image.get_height() - px(14)
+    text_y = separator_y + px(12)
     line_height = font.get_linesize()
-    max_lines = max(1, (prompt_y - text_y - 8) // line_height)
+    max_lines = max(1, (prompt_y - text_y - px(8)) // line_height)
     wrapped = _wrap_text(text, font, box.width - padding * 2)
     visible_lines = wrapped[:max_lines]
     if len(wrapped) > max_lines and visible_lines:
@@ -241,24 +250,28 @@ def draw_menu_box(
     font: pygame.font.Font,
 ) -> None:
     box = pygame.Rect(rect)
+    scale = _ui_scale(surface)
+    px = lambda value: max(1, round(value * scale))
     pygame.draw.rect(surface, (18, 22, 30), box)
-    pygame.draw.rect(surface, (235, 222, 178), box, 4)
-    pygame.draw.rect(surface, (85, 96, 98), box.inflate(-14, -14), 2)
+    pygame.draw.rect(surface, (235, 222, 178), box, px(4))
+    pygame.draw.rect(
+        surface, (85, 96, 98), box.inflate(-px(14), -px(14)), px(2)
+    )
 
-    line_height = font.get_linesize() + 10
-    start_y = box.y + 20
+    line_height = font.get_linesize() + px(10)
+    start_y = box.y + px(20)
     for index, option in enumerate(options):
         option_y = start_y + index * line_height
         if index == selected_index:
             highlight = pygame.Rect(
-                box.x + 14,
-                option_y - 4,
-                box.width - 28,
+                box.x + px(14),
+                option_y - px(4),
+                box.width - px(28),
                 line_height,
             )
             pygame.draw.rect(surface, (64, 82, 86), highlight)
-            pygame.draw.rect(surface, (123, 137, 127), highlight, 2)
+            pygame.draw.rect(surface, (123, 137, 127), highlight, px(2))
             marker = font.render(">", True, (247, 205, 104))
-            surface.blit(marker, (box.x + 24, option_y))
+            surface.blit(marker, (box.x + px(24), option_y))
         option_image = font.render(option, True, (241, 239, 220))
-        surface.blit(option_image, (box.x + 56, option_y))
+        surface.blit(option_image, (box.x + px(56), option_y))
