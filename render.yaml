@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: echoworld-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && python scripts/build_web.py
+    startCommand: uvicorn backend_api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: COGNEE_API_KEY
+        sync: false
+      - key: COGNEE_SERVICE_URL
+        sync: false
+      - key: USE_COGNEE_CLOUD
+        value: "true"
+      - key: OPENAI_MODEL
+        sync: false

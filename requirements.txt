@@ -1,0 +1,9 @@
+cognee
+openai
+python-dotenv
+rich
+streamlit
+pygame-ce
+fastapi
+uvicorn
+pygbag

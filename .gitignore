@@ -1,0 +1,22 @@
+.venv/
+# Local environment secrets
+.env
+**pycache**/
+*.pyc
+.echoworld_state.json
+.echoworld_events.jsonl
+.echoworld_dataset_registry.json
+.echoworld_attitudes.json
+.echoworld_promises.json
+.echoworld_tutorial.json
+.cognee/
+*.db
+*.sqlite
+*.sqlite3
+web_dist/
+web_build/build/
+web_build/game_app.py
+web_build/pixel_assets.py
+web_build/tutorial_system.py
+web_build/backend_adapter.py
+web_build/web_backend_client.py
