@@ -1104,6 +1104,10 @@ def draw_world(
 
 def memory_status_label(last_api_event: str) -> str:
     event = last_api_event.casefold()
+    if "forget() cleared mira memory" in event:
+        return "forget() cleared Mira memory"
+    if "forget() attempted npc memory reset" in event:
+        return "forget() attempted memory reset"
     if "promise broken" in event:
         return "promise broken"
     if "promise remembered" in event:
@@ -1582,10 +1586,24 @@ def draw_tutorial_popup(
     title_image = title_font.render(title, True, (9, 64, 77))
     surface.blit(title_image, (speech.x + px(24), speech.y + px(22)))
 
-    body = " ".join(str(page.get("body") or "").split())
+    body = "\n".join(
+        " ".join(line.split())
+        for line in str(page.get("body") or "").splitlines()
+    )
+    page_footer = " ".join(str(page.get("footer") or "").split())
+    page_footer_lines = (
+        wrap_text(page_footer, small_font, speech.width - px(48))[:2]
+        if page_footer
+        else []
+    )
+    footer_reserved = (
+        len(page_footer_lines) * small_font.get_linesize() + px(52)
+        if page_footer_lines
+        else 0
+    )
     max_body_lines = max(
         5,
-        (speech.height - px(110))
+        (speech.height - px(110) - footer_reserved)
         // (body_font.get_linesize() + px(3)),
     )
     body_lines = wrap_text(body, body_font, speech.width - px(48))[
@@ -1597,17 +1615,44 @@ def draw_tutorial_popup(
         surface.blit(line_image, (speech.x + px(24), line_y))
         line_y += body_font.get_linesize() + px(3)
 
+    if page_footer_lines:
+        footer_y = (
+            speech.bottom
+            - px(22)
+            - len(page_footer_lines) * small_font.get_linesize()
+        )
+        pygame.draw.line(
+            surface,
+            (67, 160, 153),
+            (speech.x + px(24), footer_y - px(12)),
+            (speech.right - px(24), footer_y - px(12)),
+            px(2),
+        )
+        for footer_index, footer_line in enumerate(page_footer_lines):
+            footer_image = small_font.render(
+                footer_line, True, (18, 101, 99)
+            )
+            surface.blit(
+                footer_image,
+                (
+                    speech.x + px(24),
+                    footer_y + footer_index * small_font.get_linesize(),
+                ),
+            )
+
     page_count = int(page.get("page_count") or 1)
     page_index = int(page.get("page_index") or 0)
     page_hint = f"  {page_index + 1}/{page_count}" if page_count > 1 else ""
-    footer = small_font.render(
+    navigation_footer = small_font.render(
         f"Enter / Space / E: Continue{page_hint}    S: Skip Tutorial",
         True,
         (182, 231, 220),
     )
     surface.blit(
-        footer,
-        footer.get_rect(center=(panel.centerx, panel.bottom - px(28))),
+        navigation_footer,
+        navigation_footer.get_rect(
+            center=(panel.centerx, panel.bottom - px(28))
+        ),
     )
 
 
@@ -2384,6 +2429,7 @@ async def run_game(browser_mode: bool = False) -> None:
     village_attitude_summary = attitude_summary_from_state(npc_attitudes)
     title_screen_active = True
     reset_confirmation = False
+    reset_from_tutorial_popup = False
     endday_active = False
     endday_started_at = 0
     endday_future: asyncio.Task | None = None
@@ -2540,6 +2586,17 @@ async def run_game(browser_mode: bool = False) -> None:
                     if event.key == pygame.K_s:
                         tutorial_state = skip_tutorial()
                         tutorial_pending_step_id = None
+                    elif event.key == pygame.K_r:
+                        popup_step = get_current_tutorial_step(tutorial_state)
+                        if (
+                            popup_step is not None
+                            and popup_step.get("id") == "outro"
+                        ):
+                            # Temporarily hide the final card so the normal
+                            # reset confirmation and backend reset path can run.
+                            tutorial_state["popup_open"] = False
+                            reset_confirmation = True
+                            reset_from_tutorial_popup = True
                     elif event.key in (
                         pygame.K_RETURN,
                         pygame.K_KP_ENTER,
@@ -2731,8 +2788,12 @@ async def run_game(browser_mode: bool = False) -> None:
                         backend_adapter.reset(),
                     )
                     reset_confirmation = False
+                    reset_from_tutorial_popup = False
                 elif event.key in (pygame.K_n, pygame.K_ESCAPE):
                     reset_confirmation = False
+                    if reset_from_tutorial_popup:
+                        tutorial_state["popup_open"] = True
+                    reset_from_tutorial_popup = False
                 continue
 
             if dialogue_pages:
@@ -2900,6 +2961,7 @@ async def run_game(browser_mode: bool = False) -> None:
                 last_api_event = "improve() + gossip"
             elif event.key == pygame.K_r and not player.moving:
                 reset_confirmation = True
+                reset_from_tutorial_popup = False
 
         if not running:
             break
@@ -3026,6 +3088,23 @@ async def run_game(browser_mode: bool = False) -> None:
                 last_api_event = error_text
                 talk_mode = "dialogue"
             else:
+                active_tutorial_step = get_current_tutorial_step(
+                    tutorial_state
+                )
+                if (
+                    completed_talk_npc is not None
+                    and completed_talk_npc.key == "guard"
+                    and talk_pending_was_forgotten
+                    and active_tutorial_step is not None
+                    and active_tutorial_step.get("id") == "mira_forget_test"
+                ):
+                    # The first post-bribe response is deliberately fresh. This
+                    # tutorial-only guard prevents a model from restating the
+                    # already-forgotten promise even if stale prose slips through.
+                    reply = (
+                        "I don't know what you're referring to. If there was "
+                        "trouble before, it is not in my memory now."
+                    )
                 if not recall_trace:
                     recall_trace = {
                         "title": "[RECALL]",
@@ -3168,8 +3247,13 @@ async def run_game(browser_mode: bool = False) -> None:
                     dialogue_pages = paginate_dialogue(result_text, dialogue_font)
                     dialogue_history.append(("System", result_text))
                     last_api_event = (
-                        "forget() was attempted; if Cloud deletion failed, dataset "
-                        "rotation isolated a fresh NPC memory."
+                        "forget() cleared Mira memory"
+                        if completed_job.npc is not None
+                        and completed_job.npc.key == "guard"
+                        else (
+                            "forget() was attempted; if Cloud deletion failed, "
+                            "dataset rotation isolated a fresh NPC memory."
+                        )
                     )
                     if completed_job.npc is not None:
                         forgotten_npcs.add(completed_job.npc.key)
@@ -3185,6 +3269,22 @@ async def run_game(browser_mode: bool = False) -> None:
                     village_attitude_summary = attitude_summary_from_state(
                         npc_attitudes
                     )
+                    if (
+                        completed_job.npc is not None
+                        and action_completes_current_step(
+                            tutorial_state,
+                            "bribe",
+                            mira_promise(promise_state),
+                            completed_job.npc.key,
+                        )
+                    ):
+                        current_tutorial_step = get_current_tutorial_step(
+                            tutorial_state
+                        )
+                        if current_tutorial_step is not None:
+                            tutorial_pending_step_id = str(
+                                current_tutorial_step.get("id")
+                            )
                 elif completed_job.action == "promise":
                     result_data = backend_result if isinstance(backend_result, dict) else {}
                     result_text = str(

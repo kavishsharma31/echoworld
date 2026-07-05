@@ -8,6 +8,83 @@ from pathlib import Path
 
 TUTORIAL_FILE = Path(".echoworld_tutorial.json")
 
+POST_DEMO_EXPLANATION_PAGES = (
+    {
+        "title": "What Just Happened?",
+        "body": (
+            "You just completed EchoWorld's full memory loop.\n\n"
+            "Gareth remembered respect.\n"
+            "Petra remembered hostility.\n"
+            "Mira noticed a lie.\n"
+            "Elder Voss learned through village gossip.\n"
+            "Mira accepted a confession.\n"
+            "Then Mira remembered a promise - and held you accountable when "
+            "you broke it."
+        ),
+        "footer": (
+            "This is the core idea: NPC memory becomes gameplay consequence."
+        ),
+    },
+    {
+        "title": "How NPC Memory Works",
+        "body": (
+            "Every important interaction is converted into structured memory.\n\n"
+            "The game tracks:\n"
+            "- trust and hostility\n"
+            "- attitude and confession\n"
+            "- gossip and promise state\n"
+            "- whether memory is direct or hearsay\n\n"
+            "Before an NPC speaks, EchoWorld recalls relevant context. That is "
+            "why Mira can connect your earlier promise with your later behavior "
+            "toward Petra."
+        ),
+        "footer": (
+            "The NPC is not just replying to your latest line. It is responding "
+            "with history."
+        ),
+    },
+    {
+        "title": "Cognee as Game Mechanics",
+        "body": (
+            "EchoWorld maps Cognee's memory APIs directly into gameplay:\n\n"
+            "remember() stores what happened.\n"
+            "recall() retrieves relevant NPC memory before dialogue.\n"
+            "improve() runs when the day ends, helping the village consolidate "
+            "events and spread gossip.\n"
+            "forget() powers Bribe / Forget, where one NPC can lose memory of "
+            "an event."
+        ),
+        "footer": (
+            "Instead of hidden backend infrastructure, EchoWorld makes memory "
+            "visible inside the game world."
+        ),
+    },
+    {
+        "title": "Why This Matters for Indie Games",
+        "body": (
+            "Indie developers usually cannot write hundreds of branching NPC "
+            "dialogue paths.\n\n"
+            "A memory layer like Cognee can help small teams build NPCs that "
+            "remember, react, gossip, forgive, and enforce consequences - "
+            "without AAA-sized writing teams or custom narrative engines."
+        ),
+        "footer": (
+            "EchoWorld is a small prototype of how memory-backed NPCs can make "
+            "game worlds feel more alive."
+        ),
+    },
+)
+
+FINAL_DEMO_COMPLETE_PAGE = {
+    "title": "Demo Complete",
+    "body": (
+        "You've seen how EchoWorld turns memory into consequence.\n\n"
+        "NPCs remembered direct interactions, shared gossip overnight, updated "
+        "their attitudes, accepted a confession, and enforced a broken promise."
+    ),
+    "footer": "Press R to restart the guided demo.",
+}
+
 TUTORIAL_STEPS = (
     {
         "id": "intro",
@@ -254,7 +331,7 @@ TUTORIAL_STEPS = (
                 "She should remember the promise — and know that you broke it."
             ),
         },),
-        "success_pages": ({
+        "legacy_success_pages": ({
             "title": "Memory became consequence",
             "body": (
                 "That’s the core idea of EchoWorld: memory becomes consequence. "
@@ -262,6 +339,57 @@ TUTORIAL_STEPS = (
                 "promise, detected your behavior, and held you accountable."
             ),
         },),
+        "success_pages": (),
+    },
+    {
+        "id": "mira_bribe",
+        "target_type": "npc",
+        "target_npc_key": "guard",
+        "expected_action": "bribe",
+        "success_condition": "mira_forget_completed",
+        "objective": "Use Bribe / Forget on Mira.",
+        "waypoint_label": "Bribe Mira",
+        "intro_pages": ({
+            "title": "Step 11: Bribe Mira",
+            "body": (
+                "You're in trouble now.\n\n"
+                "Mira remembered your promise and confronted you for breaking "
+                "it.\n\n"
+                "Use Bribe / Forget on Mira to make her forget what happened."
+            ),
+            "footer": (
+                "This demonstrates Cognee's forget() path as a game mechanic."
+            ),
+        },),
+        "success_pages": ({
+            "title": "Mira Forgot",
+            "body": (
+                "Mira's memory has been cleared for this thread.\n\n"
+                "Now test whether she still remembers what you did."
+            ),
+        },),
+    },
+    {
+        "id": "mira_forget_test",
+        "target_type": "npc",
+        "target_npc_key": "guard",
+        "expected_action": "talk",
+        "success_condition": "post_forget_mira_talk_completed",
+        "objective": "Talk to Mira and ask if she remembers.",
+        "waypoint_label": "Test Mira's Memory",
+        "intro_pages": ({
+            "title": "Step 12: Test the Forget",
+            "body": (
+                "Talk to Mira again and ask if she remembers what happened.\n\n"
+                "Suggested line:\n"
+                "Do you remember the things I did?"
+            ),
+            "footer": (
+                "If forget worked, Mira should no longer recall the broken "
+                "promise consequence."
+            ),
+        },),
+        "success_pages": POST_DEMO_EXPLANATION_PAGES,
     },
     {
         "id": "outro",
@@ -271,7 +399,7 @@ TUTORIAL_STEPS = (
         "success_condition": "outro_acknowledged",
         "objective": "Guided demo complete.",
         "waypoint_label": "Demo Complete",
-        "intro_pages": ({
+        "legacy_intro_pages": ({
             "title": "Demo Complete",
             "body": (
                 "In EchoWorld, Cognee powers persistent memory across direct "
@@ -280,6 +408,7 @@ TUTORIAL_STEPS = (
                 "demo. Feel free to keep exploring the village."
             ),
         },),
+        "intro_pages": (FINAL_DEMO_COMPLETE_PAGE,),
         "success_pages": (),
     },
 )
@@ -568,6 +697,10 @@ def interaction_completes_current_step(
             and isinstance(promise_state, dict)
             and promise_state.get("callout_delivered")
         )
+    if step_id == "mira_forget_test":
+        # Reaching this step already proves the guard-only Bribe / Forget job
+        # completed. Any subsequent Talk to Mira is a valid memory check.
+        return npc == "guard" and normalized_action == "talk"
     return False
 
 
@@ -575,12 +708,14 @@ def action_completes_current_step(
     state: dict,
     action: str,
     promise_state: dict | None = None,
+    npc_key: str | None = None,
 ) -> bool:
     step = get_current_tutorial_step(state)
     if step is None or state.get("popup_open"):
         return False
     step_id = str(step.get("id") or "")
     normalized_action = str(action or "").casefold().strip()
+    normalized_npc = str(npc_key or "").casefold().strip()
     if step_id in {"end_day_1", "end_day_2"}:
         return normalized_action == "end_day"
     if step_id == "mira_promise":
@@ -589,4 +724,6 @@ def action_completes_current_step(
             and isinstance(promise_state, dict)
             and promise_state.get("status") == "active"
         )
+    if step_id == "mira_bribe":
+        return normalized_action == "bribe" and normalized_npc == "guard"
     return False
